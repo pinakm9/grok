@@ -45,7 +45,7 @@ class MLP(nn.Module):
     def load(self, folder, name):
         torch.load(self, f'{folder}/{name}')
 
-    def re_init(self, layer_indices, distribution, alpha=None):
+    def re_init(self, layer_indices, distribution, alpha=None, beta=None):
         """
         Re-initialize the given layers of the network.
 
@@ -61,14 +61,18 @@ class MLP(nn.Module):
         if isinstance(layer_indices, int):
             layer_indices = [layer_indices]
         for layer_index in layer_indices:
-            out_f = self.hidden[layer_index].out_features
-            tensor = getattr(dist, distribution)(self.hidden[layer_index])
+            # reinitialize the layer weights
+            tensor = getattr(dist, distribution)(self.hidden[layer_index], 'weight')
             if alpha is not None:
-                tensor = alpha * tensor / torch.linalg.norm(tensor) 
+                tensor = alpha * tensor #/ torch.linalg.norm(tensor) 
             self.hidden[layer_index].weight = nn.Parameter(tensor) 
-            self.hidden[layer_index].bias = nn.Parameter(torch.zeros(out_f))
+            # reinitialize the layer biases
+            tensor = getattr(dist, distribution)(self.hidden[layer_index], 'bias')
+            if beta is not None:
+                tensor = beta * tensor #/ torch.linalg.norm(tensor) 
+            self.hidden[layer_index].bias = nn.Parameter(tensor) 
 
-    def learn(self, problem, train, test, loss_function, save_folder='.', device='cpu', batch_size=64, learning_rate=1e-3, weight_decay=1., optimization_steps=100000, log_freq=100):
+    def learn(self, problem, train, test, loss_function, save_folder='.', device='cpu', batch_size=64, learning_rate=1e-3, weight_decay=1e-2, optimization_steps=100000, log_freq=100):
         """
         Learn the parameters of a model on a given problem.
 
@@ -125,6 +129,9 @@ class MLP(nn.Module):
         log_file = f'{save_folder}/log.csv'
         if os.path.exists(log_file):
             os.remove(log_file)
+        with open(f'{save_folder}/config.json', 'w') as outfile:
+            json.dump(loc, outfile, indent=4)
+
         columns = ['step', 'train_loss', 'test_loss', 'train_accuracy', 'test_accuracy', 'weight_norm', 'last_layer_norm', 'time']
 
 
@@ -133,7 +140,7 @@ class MLP(nn.Module):
         loss_fn = problem.loss_function_dict[loss_function]()
 
         train_loader = torch.utils.data.DataLoader(train, batch_size=batch_size, shuffle=True)
-        optimizer = torch.optim.AdamW(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
+        optimizer = torch.optim.Adam(self.parameters(), lr=learning_rate, weight_decay=weight_decay)
         
         
         start_time = time.time()
